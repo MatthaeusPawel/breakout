@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html>
+<head>
+<!--<table id="qtable" style="display: none">-->
+<table id="qtable">
+  <tr> 
+    <th>xPaddleQuant</th>
+    <th>xBallQuant</th>
+    <th>yBallQuant</th>
+    <th>AngleQuant</th>
+    <th>Action</th>
+    <th>Q-Value</th>
+  </tr>
+</table>
+
+<script type="module">
+  'use strict'
+  import * as main from "./main.js";
+  let tab = document.getElementById("qtable");
+  
+  for (let i = 0; i < main.xPaddleQuantSize; ++i)
+    for (let j = 0; j < main.xBallQuantSize; ++j)
+      for (let k = 0; k < main.yBallQuantSize; ++k)
+        for (let l = 0; l < main.angleQuantSize; ++l)
+          for (let n = 0; n < main.actionQuantSize; ++n){
+            let row = tab.insertRow();
+            row.id = `${i},${j},${k},${l},${n}`
+            let cell = row.insertCell()
+            cell.innerHTML = i;
+
+            cell = row.insertCell();
+            cell.innerHTML = j;
+
+            cell = row.insertCell();
+            cell.innerHTML = k;
+
+            cell = row.insertCell();
+            cell.innerHTML = l;
+
+            cell = row.insertCell();
+            cell.innerHTML = n;
+
+            cell = row.insertCell();
+            cell.innerHTML = 0;
+            
+        }
+</script>
+
+<script src="./main.js" type="module"></script>
+    <meta charset="utf-8" />
+    <title>Breakout</title>
+    <style>
+    	* { padding: 0; margin: 0; }
+    	canvas { background: #eee; display: block; margin: 0 auto; }
+    </style>
+</head>
+<body>
+
+<canvas id="myCanvas" width="480" height="320"></canvas>
+
+<div id="scoreid">0</div>
+<div id="fieldsid">0</div>
+<div id="filledfieldsid">0</div>
+<div id="trainingquoteid">0</div>
+
+<script type="module">
+  import * as main from "./main.js";
+  let canvas = document.getElementById("myCanvas");
+  let scoreelement = document.getElementById("scoreid");
+  let fieldselement = document.getElementById("fieldsid");
+  let filledfieldselement = document.getElementById("filledfieldsid");
+  let trainingquoteelement = document.getElementById("trainingquoteid");
+  let ctx = canvas.getContext("2d");
+
+  // Initialize parameter for the game
+  let xBall = 100, yBall = 100;
+  let dxBall = 1, dyBall = 1;
+  
+  let score = 0;
+  let newScore = 0;
+
+  let xPaddle = 200;
+  const yPaddle = canvas.height - main.heightPaddle;
+  
+  let radiusBall = 20;
+  let angle = main.computeAngle(dxBall, dyBall);
+  
+  // Initialze parameter for learning
+  let xPaddleQuantCurrent;
+  let xBallQuantCurrent;
+  let yBallQuantCurrent;
+  let angleQuantCurrent;
+  
+  let xPaddleQuantNext;
+  let xBallQuantNext;
+  let yBallQuantNext;
+  let angleQuantNext;
+  
+  let angleDeQuantMin, angleDeQuantMax;
+
+
+  let currentAction = -1; // in {-1, 0, +1}
+  let prevAction = -1; // in {-1, 0, +1}
+  let currentStationaryExplorationTime;
+  function updateGame (){
+
+    try {
+      if (main.trainingphase && xPaddleQuantCurrent!==xPaddleQuantNext){
+        currentStationaryExplorationTime = main.stationaryExplorationTime;
+        prevAction = currentAction;
+      }
+
+      xPaddleQuantCurrent = main.quantize(xPaddle+main.widthPaddle/2, +main.widthPaddle/2, canvas.width - main.widthPaddle/2, main.xPaddleQuantSize);
+      xBallQuantCurrent = main.quantize(xBall, radiusBall, canvas.width - radiusBall, main.xBallQuantSize);
+      yBallQuantCurrent = main.quantize(yBall, radiusBall, canvas.height - radiusBall, main.yBallQuantSize);
+      angleQuantCurrent = main.quantize(angle, 0, 2*Math.PI, main.angleQuantSize);
+      
+      currentAction = main.getAction(main.actionstate[xPaddleQuantCurrent][xBallQuantCurrent][yBallQuantCurrent][angleQuantCurrent], prevAction, currentStationaryExplorationTime);
+      currentStationaryExplorationTime--;
+      
+      if (currentStationaryExplorationTime< 0)
+        prevAction = currentAction;
+
+      ({dxBall, dyBall, newScore} = main.updateDirections(xBall, yBall, canvas.width, canvas.height, dxBall, dyBall, radiusBall, score, xPaddle, yPaddle));
+      ({xPaddle, newScore} = main.updatePaddle(xPaddle, currentAction, newScore));
+      angle = main.computeAngle(dxBall, dyBall);
+      xBall += dxBall;
+      yBall += dyBall;
+
+      xBall = main.boundedRange(xBall, radiusBall, canvas.width - radiusBall);
+      yBall = main.boundedRange(yBall, radiusBall, canvas.height - radiusBall);
+
+      xPaddleQuantNext = main.quantize(xPaddle+main.widthPaddle/2, +main.widthPaddle/2, canvas.width - main.widthPaddle/2, main.xPaddleQuantSize);
+      xBallQuantNext = main.quantize(xBall, radiusBall, canvas.width - radiusBall, main.xBallQuantSize);
+      yBallQuantNext = main.quantize(yBall, radiusBall, canvas.height - radiusBall, main.yBallQuantSize);
+      angleQuantNext = main.quantize(angle, 0, 2*Math.PI, main.angleQuantSize);
+
+      main.actionstate[xPaddleQuantCurrent][xBallQuantCurrent][yBallQuantCurrent][angleQuantCurrent][main.getActionIndex(currentAction)] 
+        = (1-main.learningRate) * main.actionstate[xPaddleQuantCurrent][xBallQuantCurrent][yBallQuantCurrent][angleQuantCurrent][main.getActionIndex(currentAction)] 
+          + main.learningRate * (newScore - score + Math.max(...main.actionstate[xPaddleQuantNext][xBallQuantNext][yBallQuantNext][angleQuantNext]));
+
+      if (Math.abs(newScore - score) > 0.01) {
+        let row = document.getElementById(`${xPaddleQuantCurrent},${xBallQuantCurrent},${yBallQuantCurrent},${angleQuantCurrent},${main.getActionIndex(currentAction)}`);
+        row.lastElementChild.innerHTML = main.actionstate[xPaddleQuantCurrent][xBallQuantCurrent][yBallQuantCurrent][angleQuantCurrent][main.getActionIndex(currentAction)] 
+        //console.log(`Changed value for ${xPaddleQuantCurrent},${xBallQuantCurrent},${yBallQuantCurrent},${angleQuantCurrent},${main.getActionIndex(currentAction)} to ${main.actionstate[xPaddleQuantCurrent][xBallQuantCurrent][yBallQuantCurrent][angleQuantCurrent][main.getActionIndex(currentAction)]}`);
+      }
+      score = newScore;
+      }
+    catch (e){
+        console.log(e);
+    }
+  }
+
+  function draw(){
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+
+    ctx.beginPath();
+    for(let i=0; i<main.xPaddleQuantSize;i++){
+      for(let j=0; j<main.yBallQuantSize;j++){
+        let rectwidth = canvas.width/main.xPaddleQuantSize;
+        let rectheight = canvas.height/main.yBallQuantSize;
+        ctx.fillStyle = ( i==xBallQuantCurrent && j==yBallQuantCurrent  )?'#FF8800':( (i+j)%2)?'#EEEEEE':'#DDDDDD';
+        ctx.fillRect(i*rectwidth, j*rectheight, rectwidth, rectheight);
+      }
+    }
+    ctx.closePath();
+    
+    ([angleDeQuantMin, angleDeQuantMax] = main.recoverRange(angleQuantCurrent, 0, 2*Math.PI, main.angleQuantSize));
+    ctx.beginPath();
+    ctx.moveTo(xBall, yBall);
+    ctx.arc(xBall, yBall, 2*radiusBall, angleDeQuantMin, angleDeQuantMax, false);
+    ctx.fillStyle = 'rgba(255, 250, 0, 0.8)';
+    ctx.fill();
+    ctx.closePath();
+
+    
+    scoreelement.textContent = score;
+    ctx.beginPath();
+    ctx.arc(xBall,yBall,radiusBall,0, Math.PI*2);
+    ctx.fillStyle = "#0095DD";
+    ctx.fill();
+    ctx.closePath();
+    
+    ctx.beginPath();
+    ctx.rect(xPaddle, yPaddle, main.widthPaddle, main.heightPaddle);
+    ctx.fillStyle = "#0095DD";
+    ctx.fill();
+    ctx.closePath();
+  }
+
+  let tmp = 1;
+  while (tmp++ < 50000000)
+    updateGame();
+  let totalfields = 0;
+  let filledfields = 0;
+  for (let i = 0; i < main.xPaddleQuantSize; ++i)
+    for (let j = 0; j < main.xBallQuantSize; ++j)
+      for (let k = 0; k < main.yBallQuantSize; ++k)
+        for (let l = 0; l < main.angleQuantSize; ++l)
+          for (let m = 0; m < main.actionQuantSize; ++m){
+            totalfields++;
+            filledfields += main.actionstate[i][j][k][l][m]? 1: 0;
+
+            let row = document.getElementById(`${i},${j},${k},${l},${m}`);
+            row.lastElementChild.innerHTML = main.actionstate[i][j][k][l][m] 
+          }
+  score = 0;
+  newScore = 0;
+  
+  tmp = 0
+  while (tmp++ < 5000000)
+    updateGame();
+  filledfieldselement.innerHTML = filledfields;
+  fieldselement.innerHTML = totalfields;
+  trainingquoteelement.innerHTML = Math.round(filledfields/totalfields*100) +"%" ;
+  setInterval(draw, 10);
+  setInterval(updateGame, 1);
+</script>
+</body>
+</html>
